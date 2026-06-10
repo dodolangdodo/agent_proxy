@@ -1,387 +1,221 @@
 <div align="center">
-  <h1>AI Proxy</h1>
-  <p>Next-generation AI gateway with OpenAI-compatible protocol</p>
-  
-  [![Release](https://img.shields.io/github/release/labring/aiproxy)](https://github.com/labring/aiproxy/releases)
-  [![License](https://img.shields.io/github/license/labring/aiproxy)](https://github.com/labring/aiproxy/blob/main/LICENSE)
-  [![Go Version](https://img.shields.io/github/go-mod/go-version/labring/aiproxy?filename=core%2Fgo.mod)](https://github.com/labring/aiproxy/blob/main/core/go.mod)
-  [![Build Status](https://img.shields.io/github/actions/workflow/status/labring/aiproxy/release.yml?branch=main)](https://github.com/labring/aiproxy/actions)
-  
-  [English](./README.md) | [简体中文](./README.zh.md)
+  <h1>Agent Proxy V2</h1>
+  <p>Lightweight AI gateway with OpenAI & Anthropic protocol translation</p>
+
+  [![Go Version](https://img.shields.io/github/go-mod/go-version/dodolangdodo/agent_proxy)](https://github.com/dodolangdodo/agent_proxy/blob/main/go.mod)
+  [![License](https://img.shields.io/github/license/dodolangdodo/agent_proxy)](https://github.com/dodolangdodo/agent_proxy/blob/main/LICENSE)
 </div>
 
 ---
 
-## 🚀 Overview
+## Overview
 
-AI Proxy is a powerful, production-ready AI gateway that provides intelligent request routing, comprehensive monitoring, and seamless multi-tenant management. Built with OpenAI-compatible, Anthropic and Gemini protocols, it serves as the perfect middleware for AI applications requiring reliability, scalability, and advanced features.
+Agent Proxy V2 is a lightweight, zero-dependency Go proxy that sits between your AI clients and multiple LLM providers. It translates between OpenAI and Anthropic API formats, load-balances across backends, and provides a web-based admin dashboard — all in a single binary with no external services required.
 
-## ✨ Key Features
+## Features
 
-### 🔄 **Intelligent Request Management**
+### Protocol Translation
+- **Canonical IR pattern**: Parse once into an intermediate representation, then serialize to any target format
+- **Auto-detection**: Identifies client protocol from URL path (`/v1/messages` = Anthropic) or headers
+- **Bidirectional**: OpenAI ↔ Anthropic, or pass-through when formats match
 
-- **Smart Retry Logic**: Intelligent retry strategies with automatic error recovery
-- **Priority-based Channel Selection**: Route requests based on channel priority and error rates
-- **Load Balancing**: Efficiently distribute traffic across multiple AI providers
-- **Protocol Conversion**: Seamless protocol conversion between OpenAI Chat Completions, Claude Messages, Gemini, and OpenAI Responses API
-  - Chat/Claude/Gemini → Responses API: Use responses-only models with any protocol
+### Load Balancing
+Seven strategies assignable per-model via the admin API:
 
-### 📊 **Comprehensive Monitoring & Analytics**
+| Strategy | Mechanism |
+|---|---|
+| `round_robin` | Atomic counter mod N |
+| `weighted_random` | Random proportional to weight |
+| `weighted_round_robin` | Smooth WRR (avoids burst) |
+| `least_latency` | Lowest EWMA latency |
+| `priority` | Highest weight always wins (default) |
+| `adaptive` | Score = weight × (minLatency/latency) × (1-errorRate) |
+| `least_usage` | Lowest token usage ratio |
 
-- **Real-time Alerts**: Proactive notifications for balance warnings, error rates, and anomalies
-- **Detailed Logging**: Complete request/response tracking with audit trails
-- **Advanced Analytics**: Request volume, error statistics, RPM/TPM metrics, and cost analysis
-- **Channel Performance**: Error rate analysis and performance monitoring
+### Backend Management
+- **Health checks**: Automatic degradation (`active` → `degraded` → `disabled`)
+- **Runtime stats**: EWMA latency, error rate, token consumption
+- **Auto-quota discovery**: Parses rate-limit headers from OpenAI, Anthropic, DeepSeek
+- **Token balance tracking**: Manual budgets + auto-discovered quotas
+- **Model mapping**: Proxy model name → real backend model name per-backend
 
-### 🏢 **Multi-tenant Architecture**
+### Filter Pipeline
+1. Model resolution (exact → fuzzy `gpt-*`/`claude-*` → `auto` fallback)
+2. Context-length filter (skips backends with insufficient `MaxContextTokens`)
+3. Cost-tier preference (`prepaid` → `pay_per_token`)
+4. Active/quota filter (skips unhealthy or exhausted backends)
 
-- **Organization Isolation**: Complete separation between different organizations
-- **Flexible Access Control**: Token-based authentication with subnet restrictions
-- **Resource Quotas**: RPM/TPM limits and usage quotas per group
-- **Custom Pricing**: Per-group model pricing and billing configuration
+### Admin Interface
+- REST API for backend CRUD and strategy configuration
+- Single-page web UI (`/ui/`) — dark theme, vanilla JS, no build step
+- Bearer token authentication
+- JSON file persistence (`proxy_state.json`)
 
-### 🤖 **MCP (Model Context Protocol) Support**
+## Quick Start
 
-- **Public MCP Servers**: Ready-to-use MCP integrations
-- **Organization MCP Servers**: Private MCP servers for organizations
-- **Embedded MCP**: Built-in MCP servers with configuration templates
-- **OpenAPI to MCP**: Automatic conversion of OpenAPI specs to MCP tools
+### Build
 
-### 🔌 **Plugin System**
-
-- **Cache Plugin**: High-performance caching for identical requests with Redis/memory storage
-- **Web Search Plugin**: Real-time web search capabilities with support for Google, Bing, and Arxiv
-- **Think Split Plugin**: Support for reasoning models with content splitting, automatically handling `<think>` tags
-- **Stream Fake Plugin**: Avoid non-streaming request timeouts through internal streaming transmission
-- **Extensible Architecture**: Easy to add custom plugins for additional functionality
-
-### 🔧 **Advanced Capabilities**
-
-- **Multi-format Support**: Text, image, audio, and document processing
-- **Model Mapping**: Flexible model aliasing and routing
-- **Prompt Caching**: Intelligent caching with billing support
-- **Think Mode**: Support for reasoning models with content splitting
-- **Built-in Tokenizer**: No external tiktoken dependencies
-
-## 📊 Management Panel
-
-AI Proxy provides a management panel for managing AI Proxy's configuration and monitoring.
-
-![Dashboard](./docs/images/dashboard.png)
-![Logs](./docs/images/logs.png)
-
-## 🏗️ Architecture
-
-```mermaid
-graph TB
-    Client[Client Applications] --> Gateway[AI Proxy Gateway]
-    Gateway --> Auth[Authentication & Authorization]
-    Gateway --> Router[Intelligent Router]
-    Gateway --> Monitor[Monitoring & Analytics]
-    Gateway --> Plugins[Plugin System]
-
-    Plugins --> CachePlugin[Cache Plugin]
-    Plugins --> SearchPlugin[Web Search Plugin]
-    Plugins --> ThinkSplitPlugin[Think Split Plugin]
-    Plugins --> StreamFakePlugin[Stream Fake Plugin]
-
-    Router --> Provider1[OpenAI]
-    Router --> Provider2[Anthropic]
-    Router --> Provider3[Azure OpenAI]
-    Router --> ProviderN[Other Providers]
-
-    Gateway --> MCP[MCP Servers]
-    MCP --> PublicMCP[Public MCP]
-    MCP --> GroupMCP[Organization MCP]
-    MCP --> EmbedMCP[Embedded MCP]
-
-    Monitor --> Alerts[Alert System]
-    Monitor --> Analytics[Analytics Dashboard]
-    Monitor --> Logs[Audit Logs]
-```
-
-## 🚀 Quick Start
-
-### Docker (Recommended)
+Zero external dependencies. Pure Go standard library.
 
 ```bash
-# Quick start with default configuration
-docker run -d \
-  --name aiproxy \
-  -p 3000:3000 \
-  -v $(pwd)/aiproxy:/aiproxy \
-  -e ADMIN_KEY=your-admin-key \
-  ghcr.io/labring/aiproxy:latest
-
-# Nightly build
-docker run -d \
-  --name aiproxy \
-  -p 3000:3000 \
-  -v $(pwd)/aiproxy:/aiproxy \
-  -e ADMIN_KEY=your-admin-key \
-  ghcr.io/labring/aiproxy:main
+go build -o proxy ./cmd/proxy/
 ```
 
-### Docker Compose
+### Run
 
 ```bash
-# Download docker-compose.yaml
-curl -O https://raw.githubusercontent.com/labring/aiproxy/main/docker-compose.yaml
+# With defaults (port 9999, SQLite file storage)
+PROXY_ADMIN_KEY=your-admin-key ./proxy
 
-# Start services
-docker-compose up -d
+# Custom config via env vars
+PROXY_LISTEN_ADDR=:9090 PROXY_ADMIN_KEY=mykey ./proxy
 ```
-
-## 🔧 Configuration
 
 ### Environment Variables
 
-#### **Core Settings**
+| Variable | Default | Description |
+|---|---|---|
+| `PROXY_LISTEN_ADDR` | `:9999` | HTTP listen address |
+| `PROXY_ADMIN_KEY` | `admin-change-me` | Admin API bearer token |
+| `PROXY_LOG_LEVEL` | `info` | Log verbosity |
 
+## API Endpoints
+
+### Proxy (no auth)
+- `POST /v1/chat/completions` — OpenAI format
+- `POST /v1/messages` — Anthropic format
+- `GET /v1/models` — Model listing
+
+### Admin (Bearer token auth)
+- `GET /api/health` — Health check (no auth)
+- `GET/POST /api/backends` — Backend CRUD
+- `PUT/DELETE /api/backends/{id}` — Update/delete backend
+- `GET/POST /api/strategies` — Strategy management
+- `GET /api/strategies/config` — List strategy configs
+
+### Web UI
+- `GET /ui/` — Admin dashboard
+
+## Architecture
+
+```
+Client (OpenAI or Anthropic format)
+  → net/http ServeMux routing
+  → Proxy Handler: detect format → parse to canonical IR
+  → Strategy Engine: select backend
+  → Provider Adapter: translate IR → backend-native format
+  → HTTP call to backend
+  → Response Adapter: translate backend response → IR → client format
+```
+
+### Request Flow
+
+1. **Format detection**: URL path or `anthropic-version` header
+2. **Parse to IR**: `RequestIR` with model, messages, stream flag
+3. **Resolve backends**: Model → candidate backends via registry snapshot
+4. **Filter pipeline**: Context window, cost tier, active status
+5. **Strategy selection**: Per-model strategy from config or default
+6. **Backend selection**: Strategy picks one backend from filtered pool
+7. **Model resolution**: Apply per-backend `model_mapping` if configured
+8. **Build request**: IR → provider-native HTTP request
+9. **Execute**: HTTP call with shared connection-pooled client
+10. **Response handling**: Parse → translate → serialize, or fast-path pass-through when formats match
+
+### Key Design Decisions
+
+- **Atomic snapshot swaps**: Registry uses `atomic.Value` for lock-free reads; all proxy handlers read without locks
+- **Shared HTTP client**: Connection pooling with HTTP/2 support, not per-request clients
+- **Async snapshot refresh**: Token recording and rate-limit capture no longer trigger deep-copy on the hot path
+- **In-memory strategy cache**: Avoids store lock on every request; background refresh every 5s
+- **Fast-path optimization**: When client format matches backend provider, skips full IR translation and forwards raw JSON with only model replacement
+
+## Backend Configuration
+
+Example backend JSON for the admin API:
+
+```json
+{
+  "name": "deepseek-pro",
+  "provider": "anthropic",
+  "base_url": "https://api.deepseek.com/anthropic",
+  "api_key": "sk-...",
+  "models": ["deepseek-v4-pro"],
+  "weight": 10,
+  "max_context_tokens": 64000,
+  "timeout_seconds": 120,
+  "model_mapping": {
+    "deepseek-v4-pro": "deepseek-chat"
+  }
+}
+```
+
+### Backend Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Display name |
+| `provider` | string | `"openai"`, `"anthropic"`, or `"custom"` |
+| `base_url` | string | Provider API base URL |
+| `api_key` | string | Provider API key (encrypted at rest) |
+| `models` | []string | Models this backend serves |
+| `model_mapping` | map | Proxy model → real backend model |
+| `weight` | int | Priority/weight for load balancing |
+| `cost_tier` | string | `"prepaid"` or `"pay_per_token"` |
+| `max_context_tokens` | int | Maximum context window (0 = unlimited) |
+| `skip_context_filter` | bool | Bypass context-length filter |
+| `max_rpm` | int | Rate limit (not yet enforced) |
+| `max_concurrent` | int | Concurrency limit (not yet enforced) |
+| `timeout_seconds` | int | Request timeout |
+| `token_balance` | int64 | Manual token budget (0 = unlimited) |
+
+## Project Structure
+
+```
+.
+├── cmd/proxy/           # Entry point, server setup
+├── internal/
+│   ├── config/          # Env var loading, atomic config snapshot
+│   ├── protocol/        # Canonical IR, parsers, serializers, adapters
+│   ├── backend/         # Backend model, registry, runtime stats, health checker
+│   ├── strategy/        # Load balancing strategies
+│   ├── proxy/           # Main request handler
+│   ├── api/             # REST admin API
+│   └── store/           # JSON file persistence
+├── web/dist/            # Single-file SPA admin UI
+└── _reference/          # Original labring/aiproxy codebase (reference)
+```
+
+## Performance Notes
+
+The proxy is optimized for minimal overhead on the hot path:
+
+- Lock-free backend reads via atomic snapshot
+- Connection reuse via shared `http.Client` with pooling
+- Request/response fast-path when client and backend formats match (skips full IR translation)
+- Async registry snapshot refresh (avoids deep-copy per request)
+- In-memory strategy cache (avoids store lock per request)
+
+For Anthropic → Anthropic routing (the most common case), the proxy adds only:
+1. Model name extraction from JSON
+2. Backend selection via registry snapshot
+3. Model replacement in raw JSON body
+4. Forward response (streaming or buffered)
+
+## Development
+
+### Requirements
+- Go 1.22+
+
+### Build
 ```bash
-LISTEN=:3000                    # Server listen address
-ADMIN_KEY=your-admin-key        # Admin API key
-DISABLE_WEB_ROOT=true           # Redirect only `/` to GitHub, keep other web routes available
+go build -o proxy ./cmd/proxy/
 ```
 
-#### **Database Configuration**
-
+### Run tests
 ```bash
-SQL_DSN=postgres://user:pass@host:5432/db    # Primary database
-LOG_SQL_DSN=postgres://user:pass@host:5432/log_db  # Log database (optional)
-REDIS=redis://localhost:6379     # Redis for caching
+go test ./...
 ```
 
-#### **Feature Toggles**
+## License
 
-```bash
-BILLING_ENABLED=true           # Enable billing features
-SAVE_ALL_LOG_DETAIL=true     # Log all request details
-```
-
-### Advanced Configuration
-
-<details>
-<summary>Click to expand advanced configuration options</summary>
-
-#### **Quotas**
-
-```bash
-GROUP_MAX_TOKEN_NUM=100        # Max tokens per group
-```
-
-#### **Logging & Retention**
-
-```bash
-LOG_STORAGE_HOURS=168          # Log retention (0 = unlimited)
-LOG_DETAIL_STORAGE_HOURS=72    # Detail log retention
-CLEAN_LOG_BATCH_SIZE=5000      # Log cleanup batch size
-```
-
-#### **Security & Access Control**
-
-```bash
-IP_GROUPS_THRESHOLD=5          # IP sharing alert threshold
-IP_GROUPS_BAN_THRESHOLD=10     # IP sharing ban threshold
-```
-
-</details>
-
-## 🔌 Plugins
-
-AI Proxy supports a plugin system that extends its functionality. Currently available plugins:
-
-### Cache Plugin
-
-The Cache Plugin provides high-performance caching for AI API requests:
-
-- **Dual Storage**: Supports both Redis and in-memory caching
-- **Content-based Keys**: Uses SHA256 hash of request body
-- **Configurable TTL**: Custom time-to-live for cached items
-- **Size Limits**: Prevents memory issues with configurable limits
-
-[View Cache Plugin Documentation](./core/relay/plugin/cache/README.md)
-
-### Web Search Plugin
-
-The Web Search Plugin adds real-time web search capabilities:
-
-- **Multiple Search Engines**: Supports Google, Bing, and Arxiv
-- **Smart Query Rewriting**: AI-powered query optimization
-- **Reference Management**: Automatic citation formatting
-- **Dynamic Control**: User-controllable search depth
-
-[View Web Search Plugin Documentation](./core/relay/plugin/web-search/README.md)
-
-### Think Split Plugin
-
-The Think Split Plugin supports content splitting for reasoning models:
-
-- **Automatic Recognition**: Automatically detects `<think>...</think>` tags in responses
-- **Content Separation**: Extracts thinking content to `reasoning_content` field
-- **Streaming Support**: Supports both streaming and non-streaming responses
-
-[View Think Split Plugin Documentation](./core/relay/plugin/thinksplit/README.md)
-
-### Stream Fake Plugin
-
-The Stream Fake Plugin solves timeout issues with non-streaming requests:
-
-- **Timeout Avoidance**: Prevents request timeouts through internal streaming transmission
-- **Transparent Conversion**: Automatically converts non-streaming requests to streaming format, transparent to clients
-- **Response Reconstruction**: Collects all streaming data chunks and reconstructs them into complete non-streaming responses
-- **Connection Keep-Alive**: Maintains active connections through streaming transmission to avoid network timeouts
-
-[View Stream Fake Plugin Documentation](./core/relay/plugin/streamfake/README.md)
-
-## 📚 API Documentation
-
-### Interactive API Explorer
-
-Visit `http://localhost:3000/swagger/index.html` for the complete API documentation with interactive examples.
-
-### Quick API Examples
-
-#### **List Available Models**
-
-```bash
-curl -H "Authorization: Bearer your-token" \
-  http://localhost:3000/v1/models
-```
-
-#### **Chat Completion**
-
-```bash
-curl -X POST http://localhost:3000/v1/chat/completions \
-  -H "Authorization: Bearer your-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-4",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-#### **Claude API**
-
-```bash
-# Use Claude models through OpenAI API format
-curl -X POST http://localhost:3000/v1/messages \
-  -H "X-Api-Key: Bearer your-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5",
-    "messages": [{"role": "user", "content": "Hello Claude!"}]
-  }'
-```
-
-## 🔌 Integrations
-
-### Sealos Platform
-
-Deploy instantly on Sealos with built-in model capabilities:
-[Deploy to Sealos](https://hzh.sealos.run/?openapp=system-aiproxy)
-
-### FastGPT Integration
-
-Seamlessly integrate with FastGPT for enhanced AI workflows:
-[FastGPT Documentation](https://doc.fastgpt.cn/docs/introduction/development/modelConfig/ai-proxy)
-
-### Claude Code Integration
-
-Use AI Proxy with Claude Code by configuring these environment variables:
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:3000
-export ANTHROPIC_AUTH_TOKEN=sk-xxx
-export ANTHROPIC_MODEL=gpt-5
-export ANTHROPIC_SMALL_FAST_MODEL=gpt-5-nano
-```
-
-### Gemini CLI Integration
-
-Use AI Proxy with Gemini CLI by configuring these environment variables:
-
-```bash
-export GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:3000
-export GEMINI_API_KEY=sk-xxx
-```
-
-Alternatively, you can use the `/auth` command in the Gemini CLI to output the `GEMINI_API_KEY`.
-
-### Codex Integration
-
-Use AI Proxy with Codex by configuring `~/.codex/config.toml`:
-
-```toml
-# Recall that in TOML, root keys must be listed before tables.
-model = "gpt-4o"
-model_provider = "aiproxy"
-
-[model_providers.aiproxy]
-# Name of the provider that will be displayed in the Codex UI.
-name = "AIProxy"
-# The path `/chat/completions` will be amended to this URL to make the POST
-# request for the chat completions.
-base_url = "http://127.0.0.1:3000/v1"
-# If `env_key` is set, identifies an environment variable that must be set when
-# using Codex with this provider. The value of the environment variable must be
-# non-empty and will be used in the `Bearer TOKEN` HTTP header for the POST request.
-env_key = "AIPROXY_API_KEY"
-# Valid values for wire_api are "chat" and "responses". Defaults to "chat" if omitted.
-wire_api = "chat"
-```
-
-**Protocol Conversion Support**:
-
-- **Responses-only models**: AI Proxy automatically converts Chat/Claude/Gemini requests to Responses API format for models that only support the Responses API
-- **Multi-protocol access**: Use any protocol (Chat Completions, Claude Messages, or Gemini) to access responses-only models
-- **Transparent conversion**: No client-side changes needed - AI Proxy handles protocol translation automatically
-
-**Reasoning / Thinking Compatibility Docs**:
-
-- [Thinking / Reasoning Compatibility](./docs/REASONING_COMPATIBILITY.md)
-
-### MCP (Model Context Protocol)
-
-AI Proxy provides comprehensive MCP support for extending AI capabilities:
-
-- **Public MCP Servers**: Community-maintained integrations
-- **Organization MCP Servers**: Private organizational tools
-- **Embedded MCP**: Easy-to-configure built-in functionality
-- **OpenAPI to MCP**: Automatic tool generation from API specifications
-
-## 🛠️ Development
-
-### Prerequisites
-
-- Go 1.24+
-- Node.js 22+ (for frontend development)
-- PostgreSQL (optional, SQLite by default)
-- Redis (optional, for caching)
-
-### Building from Source
-
-```bash
-# Clone repository
-git clone https://github.com/labring/aiproxy.git
-cd aiproxy
-
-# Build frontend (optional)
-cd web && npm install -g pnpm && pnpm install && pnpm run build && cp -r dist ../core/public/dist/ && cd ..
-
-# Build backend
-cd core && go build -o aiproxy .
-
-# Run
-./aiproxy
-```
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- OpenAI for the API specification
-- The open-source community for various integrations
-- All contributors and users of AI Proxy
+MIT License — see [LICENSE](LICENSE) file.
