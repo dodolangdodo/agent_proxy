@@ -1,0 +1,158 @@
+{
+  "user_patches": [
+    {
+      "name": "custom_temperature_limit",
+      "description": "Limit temperature to 1.5 for all models",
+      "conditions": [
+        {
+          "key": "temperature",
+          "operator": "exists",
+          "value": ""
+        }
+      ],
+      "operations": [
+        {
+          "op": "limit",
+          "key": "temperature",
+          "value": 1.5
+        }
+      ]
+    },
+    {
+      "name": "add_default_top_p",
+      "description": "Add default top_p if not specified",
+      "conditions": [
+        {
+          "key": "top_p",
+          "operator": "not_exists",
+          "value": ""
+        }
+      ],
+      "operations": [
+        {
+          "op": "add",
+          "key": "top_p",
+          "value": 0.9
+        }
+      ]
+    },
+    {
+      "name": "remove_system_fingerprint_for_old_models",
+      "description": "Remove system_fingerprint for models that don't support it",
+      "conditions": [
+        {
+          "key": "model",
+          "operator": "regex",
+          "value": "gpt-3\\.5-turbo"
+        },
+        {
+          "key": "system_fingerprint",
+          "operator": "exists", 
+          "value": ""
+        }
+      ],
+      "operations": [
+        {
+          "op": "delete",
+          "key": "system_fingerprint"
+        }
+      ]
+    },
+    {
+      "name": "anthropic_specific_settings",
+      "description": "Apply Anthropic-specific optimizations",
+      "conditions": [
+        {
+          "key": "model",
+          "operator": "contains",
+          "value": "claude"
+        }
+      ],
+      "operations": [
+        {
+          "op": "limit",
+          "key": "max_tokens",
+          "value": 4096
+        },
+        {
+          "op": "set",
+          "key": "anthropic_version",
+          "value": "2023-06-01"
+        }
+      ]
+    },
+    {
+      "name": "convert_legacy_stop_to_stop_sequences",
+      "description": "Convert stop parameter to stop_sequences for Claude models",
+      "conditions": [
+        {
+          "key": "model",
+          "operator": "contains",
+          "value": "claude"
+        },
+        {
+          "key": "stop",
+          "operator": "exists",
+          "value": ""
+        }
+      ],
+      "operations": [
+        {
+          "op": "set",
+          "key": "stop_sequences",
+          "value": "{{stop}}"
+        },
+        {
+          "op": "delete",
+          "key": "stop"
+        }
+      ]
+    },
+    {
+      "name": "nested_parameter_example",
+      "description": "Example of setting nested parameters",
+      "conditions": [
+        {
+          "key": "model",
+          "operator": "equals",
+          "value": "example-model"
+        }
+      ],
+      "operations": [
+        {
+          "op": "set",
+          "key": "generation_config.max_output_tokens",
+          "value": 2048
+        },
+        {
+          "op": "set", 
+          "key": "generation_config.temperature",
+          "value": 0.7
+        },
+        {
+          "op": "set",
+          "key": "safety_settings.category",
+          "value": "HARM_CATEGORY_DANGEROUS_CONTENT"
+        }
+      ]
+    },
+    {
+      "name": "model_specific_token_limits",
+      "description": "Set appropriate token limits based on model capabilities",
+      "conditions": [
+        {
+          "key": "original_model", 
+          "operator": "regex",
+          "value": "gpt-4-turbo"
+        }
+      ],
+      "operations": [
+        {
+          "op": "limit",
+          "key": "max_tokens",
+          "value": 4096
+        }
+      ]
+    }
+  ]
+}

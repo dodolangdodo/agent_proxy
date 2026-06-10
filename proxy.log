@@ -1,0 +1,26 @@
+2026/06/10 06:40:50 Loaded 2 backends
+2026/06/10 06:40:50 Loaded 4 strategy configs
+2026/06/10 06:40:50 Web UI: http://localhost:9999/ui
+2026/06/10 06:40:50 Proxy listening on :9999
+2026/06/10 06:40:50 Admin API: http://localhost:9999/api/health
+2026/06/10 06:40:52 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:40:53 [proxy] backend=kimi status=200 len=503
+2026/06/10 06:40:53 [http] POST /v1/messages anthropic-proxy 1.576327581s
+2026/06/10 06:41:13 [proxy] no backends for model=claude-sonnet-4-6, falling back to auto
+2026/06/10 06:41:13 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:41:26 [http] POST /v1/messages anthropic-proxy 12.490575119s
+2026/06/10 06:41:26 [proxy] no backends for model=claude-sonnet-4-6, falling back to auto
+2026/06/10 06:41:26 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:41:32 [http] POST /v1/messages anthropic-proxy 5.779031586s
+2026/06/10 06:41:32 [proxy] no backends for model=claude-sonnet-4-6, falling back to auto
+2026/06/10 06:41:32 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:41:52 [http] POST /v1/messages anthropic-proxy 19.928733679s
+2026/06/10 06:43:15 [proxy] no backends for model=claude-sonnet-4-6, falling back to auto
+2026/06/10 06:43:15 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:43:19 [http] POST /v1/messages anthropic-proxy 4.297031826s
+2026/06/10 06:43:19 [proxy] no backends for model=claude-sonnet-4-6, falling back to auto
+2026/06/10 06:43:19 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:43:22 [http] POST /v1/messages anthropic-proxy 3.24054442s
+2026/06/10 06:43:23 [proxy] no backends for model=claude-sonnet-4-6, falling back to auto
+2026/06/10 06:43:23 [proxy] model=auto strategy=round_robin tier=prepaid backend=kimi(2c763e0f-d294-4d73-af38-466f323e22dd)
+2026/06/10 06:43:26 [http] POST /v1/messages anthropic-proxy 3.046398754s

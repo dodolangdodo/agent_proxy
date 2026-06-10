@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>AIProxy</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        text-align: center;
+        margin: 0;
+        padding: 20px;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      }
+
+      .container {
+        background: white;
+        padding: 40px;
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        max-width: 500px;
+        width: 100%;
+        animation: fadeIn 0.5s ease-in;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 20px;
+        font-size: 2rem;
+      }
+
+      .status-icon {
+        font-size: 3rem;
+        color: #28a745;
+        margin-bottom: 20px;
+      }
+
+      .countdown {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #007bff;
+        margin: 20px 0;
+        padding: 10px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        transition: all 0.3s ease;
+      }
+
+      .countdown.warning {
+        color: #dc3545;
+        background: #fff5f5;
+      }
+
+      .redirect-info {
+        margin: 20px 0;
+        color: #666;
+      }
+
+      .btn {
+        display: inline-block;
+        padding: 12px 24px;
+        background: #007bff;
+        color: white;
+        text-decoration: none;
+        border-radius: 25px;
+        transition: all 0.3s ease;
+        margin: 10px;
+        font-weight: 500;
+      }
+
+      .btn:hover {
+        background: #0056b3;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 123, 255, 0.3);
+      }
+
+      .btn-secondary {
+        background: #6c757d;
+      }
+
+      .btn-secondary:hover {
+        background: #545b62;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 4px;
+        background: #e9ecef;
+        border-radius: 2px;
+        margin: 20px 0;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #007bff, #0056b3);
+        border-radius: 2px;
+        transition: width 1s linear;
+      }
+
+      @media (max-width: 480px) {
+        .container {
+          padding: 20px;
+          margin: 10px;
+        }
+
+        h1 {
+          font-size: 1.5rem;
+        }
+
+        .countdown {
+          font-size: 1.5rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="status-icon">✅</div>
+      <h1>AIProxy is Running!</h1>
+
+      <div class="redirect-info">
+        <p>Redirecting to:</p>
+        <a href="{{.URL}}" class="url-display" target="_self">{{.URL}}</a>
+      </div>
+
+      <div class="countdown" id="countdown">{{.INITIAL_COUNTDOWN}}</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressBar"></div>
+      </div>
+
+      <div>
+        <a href="{{.URL}}" class="btn" target="_self">Go Now</a>
+      </div>
+    </div>
+
+    <script>
+      const INITIAL_COUNTDOWN = {{.INITIAL_COUNTDOWN}};
+
+      let countdown = INITIAL_COUNTDOWN;
+      let isActive = true;
+
+      const countdownElement = document.getElementById("countdown");
+      const progressBar = document.getElementById("progressBar");
+      const cancelBtn = document.getElementById("cancelBtn");
+
+      progressBar.style.width = "100%";
+
+      const timer = setInterval(() => {
+        if (!isActive) return;
+
+        countdown--;
+        countdownElement.textContent = countdown;
+
+        const progress = (countdown / INITIAL_COUNTDOWN) * 100;
+        progressBar.style.width = progress + "%";
+
+        if (countdown <= 3) {
+          countdownElement.classList.add("warning");
+        }
+
+        if (countdown <= 0) {
+          clearInterval(timer);
+          countdownElement.textContent = "Redirecting...";
+          progressBar.style.width = "0%";
+
+          setTimeout(() => {
+            window.location.href = "{{.URL}}";
+          }, 500);
+        }
+      }, 1000);
+    </script>
+  </body>
+</html>

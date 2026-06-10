@@ -1,0 +1,1486 @@
+package model
+
+import (
+	"cmp"
+	"errors"
+	"slices"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+type SummaryMinute struct {
+	ID     int                 `gorm:"primaryKey"`
+	Unique SummaryMinuteUnique `gorm:"embedded"`
+	Data   SummaryData         `gorm:"embedded"`
+}
+
+type SummaryMinuteUnique struct {
+	ChannelID       int    `gorm:"not null;uniqueIndex:idx_summary_minute_unique,priority:1"`
+	Model           string `gorm:"size:128;not null;uniqueIndex:idx_summary_minute_unique,priority:2"`
+	MinuteTimestamp int64  `gorm:"not null;uniqueIndex:idx_summary_minute_unique,priority:3,sort:desc"`
+}
+
+func (l *SummaryMinute) BeforeCreate(_ *gorm.DB) (err error) {
+	if l.Unique.ChannelID == 0 {
+		return errors.New("channel id is required")
+	}
+
+	if l.Unique.Model == "" {
+		return errors.New("model is required")
+	}
+
+	if l.Unique.MinuteTimestamp == 0 {
+		return errors.New("minute timestamp is required")
+	}
+
+	if err := validateMinuteTimestamp(l.Unique.MinuteTimestamp); err != nil {
+		return err
+	}
+
+	return err
+}
+
+var minuteTimestampDivisor = int64(time.Minute.Seconds())
+
+func validateMinuteTimestamp(minuteTimestamp int64) error {
+	if minuteTimestamp%minuteTimestampDivisor != 0 {
+		return errors.New("minute timestamp must be an exact minute")
+	}
+	return nil
+}
+
+func CreateSummaryMinuteIndexs(db *gorm.DB) error {
+	indexes := []string{
+		"CREATE INDEX IF NOT EXISTS idx_summary_minute_channel_minute ON summary_minutes (channel_id, minute_timestamp DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_summary_minute_model_minute ON summary_minutes (model, minute_timestamp DESC)",
+	}
+
+	for _, index := range indexes {
+		if err := db.Exec(index).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func UpsertSummaryMinute(unique SummaryMinuteUnique, data SummaryData) error {
+	err := validateMinuteTimestamp(unique.MinuteTimestamp)
+	if err != nil {
+		return err
+	}
+
+	for range 3 {
+		result := LogDB.
+			Model(&SummaryMinute{}).
+			Where(
+				"channel_id = ? AND model = ? AND minute_timestamp = ?",
+				unique.ChannelID,
+				unique.Model,
+				unique.MinuteTimestamp,
+			).
+			Updates(data.buildUpdateData("summary_minutes"))
+
+		err = result.Error
+		if err != nil {
+			return err
+		}
+
+		if result.RowsAffected > 0 {
+			return nil
+		}
+
+		err = createSummaryMinute(unique, data)
+		if err == nil {
+			return nil
+		}
+
+		if !errors.Is(err, gorm.ErrDuplicatedKey) {
+			return err
+		}
+	}
+
+	return err
+}
+
+func createSummaryMinute(unique SummaryMinuteUnique, data SummaryData) error {
+	return LogDB.
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "channel_id"},
+				{Name: "model"},
+				{Name: "minute_timestamp"},
+			},
+			DoUpdates: clause.Assignments(data.buildUpdateData("summary_minutes")),
+		}).
+		Create(&SummaryMinute{
+			Unique: unique,
+			Data:   data,
+		}).Error
+}
+
+func getChartDataMinute(
+	start, end time.Time,
+	channelID int,
+	modelName string,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) ([]ChartData, error) {
+	query := LogDB.Model(&SummaryMinute{})
+
+	if channelID != 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("minute_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("minute_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("minute_timestamp <= ?", end.Unix())
+	}
+
+	selectFields := fields.BuildSelectFields("minute_timestamp")
+
+	query = query.
+		Select(selectFields).
+		Group("timestamp")
+
+	var chartData []ChartData
+
+	err := query.Find(&chartData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if len(chartData) > 0 && timeSpan != TimeSpanMinute {
+		chartData = aggregateDataToSpan(chartData, timeSpan, timezone)
+	}
+
+	slices.SortFunc(chartData, func(a, b ChartData) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return chartData, nil
+}
+
+func getGroupChartDataMinute(
+	group string,
+	start, end time.Time,
+	tokenName, modelName string,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) ([]ChartData, error) {
+	query := LogDB.Model(&GroupSummaryMinute{})
+	if group != "" {
+		query = query.Where("group_id = ?", group)
+	}
+
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("minute_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("minute_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("minute_timestamp <= ?", end.Unix())
+	}
+
+	selectFields := fields.BuildSelectFields("minute_timestamp")
+
+	query = query.
+		Select(selectFields).
+		Group("timestamp")
+
+	var chartData []ChartData
+
+	err := query.Find(&chartData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if len(chartData) > 0 && timeSpan != TimeSpanMinute {
+		chartData = aggregateDataToSpan(chartData, timeSpan, timezone)
+	}
+
+	slices.SortFunc(chartData, func(a, b ChartData) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return chartData, nil
+}
+
+func GetUsedChannelsMinute(start, end time.Time) ([]int, error) {
+	return getLogGroupByValuesMinute[int]("channel_id", 0, start, end)
+}
+
+func GetChannelLastRequestTimeMinute(channelID int) (time.Time, error) {
+	if channelID == 0 {
+		return time.Time{}, errors.New("channel id is required")
+	}
+
+	var summary SummaryMinute
+
+	err := LogDB.
+		Model(&SummaryMinute{}).
+		Where("channel_id = ?", channelID).
+		Order("minute_timestamp desc").
+		First(&summary).Error
+	if summary.Unique.MinuteTimestamp == 0 {
+		return time.Time{}, nil
+	}
+
+	return time.Unix(summary.Unique.MinuteTimestamp, 0), err
+}
+
+func GetUsedModelsMinute(channelID int, start, end time.Time) ([]string, error) {
+	return getLogGroupByValuesMinute[string]("model", channelID, start, end)
+}
+
+func GetGroupUsedModelsMinute(group, tokenName string, start, end time.Time) ([]string, error) {
+	return getGroupLogGroupByValuesMinute[string]("model", group, tokenName, start, end)
+}
+
+func GetGroupUsedTokenNamesMinute(group string, start, end time.Time) ([]string, error) {
+	return getGroupLogGroupByValuesMinute[string]("token_name", group, "", start, end)
+}
+
+func getLogGroupByValuesMinute[T cmp.Ordered](
+	field string,
+	channelID int,
+	start, end time.Time,
+) ([]T, error) {
+	type Result struct {
+		Value        T
+		UsedAmount   float64
+		RequestCount int64
+	}
+
+	var results []Result
+
+	var query *gorm.DB
+
+	query = LogDB.
+		Model(&SummaryMinute{})
+
+	if channelID != 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("minute_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("minute_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("minute_timestamp <= ?", end.Unix())
+	}
+
+	err := query.
+		Select(
+			field + " as value, SUM(request_count) as request_count, SUM(used_amount) as used_amount",
+		).
+		Group(field).
+		Find(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(results, func(a, b Result) int {
+		if a.UsedAmount != b.UsedAmount {
+			return cmp.Compare(b.UsedAmount, a.UsedAmount)
+		}
+
+		if a.RequestCount != b.RequestCount {
+			return cmp.Compare(b.RequestCount, a.RequestCount)
+		}
+
+		return cmp.Compare(a.Value, b.Value)
+	})
+
+	values := make([]T, len(results))
+	for i, result := range results {
+		values[i] = result.Value
+	}
+
+	return values, nil
+}
+
+func getGroupLogGroupByValuesMinute[T cmp.Ordered](
+	field, group, tokenName string,
+	start, end time.Time,
+) ([]T, error) {
+	type Result struct {
+		Value        T
+		UsedAmount   float64
+		RequestCount int64
+	}
+
+	var results []Result
+
+	query := LogDB.
+		Model(&GroupSummaryMinute{})
+	if group != "" {
+		query = query.Where("group_id = ?", group)
+	}
+
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("minute_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("minute_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("minute_timestamp <= ?", end.Unix())
+	}
+
+	err := query.
+		Select(
+			field + " as value, SUM(request_count) as request_count, SUM(used_amount) as used_amount",
+		).
+		Group(field).
+		Find(&results).Error
+	if err != nil {
+		return nil, err
+	}
+
+	slices.SortFunc(results, func(a, b Result) int {
+		if a.UsedAmount != b.UsedAmount {
+			return cmp.Compare(b.UsedAmount, a.UsedAmount)
+		}
+
+		if a.RequestCount != b.RequestCount {
+			return cmp.Compare(b.RequestCount, a.RequestCount)
+		}
+
+		return cmp.Compare(a.Value, b.Value)
+	})
+
+	values := make([]T, len(results))
+	for i, result := range results {
+		values[i] = result.Value
+	}
+
+	return values, nil
+}
+
+func getDashboardDataMinute(
+	start,
+	end time.Time,
+	modelName string,
+	channelID int,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) (*DashboardResponse, error) {
+	if end.IsZero() {
+		end = time.Now()
+	} else if end.Before(start) {
+		return nil, errors.New("end time is before start time")
+	}
+
+	var (
+		chartData  []ChartData
+		channels   []int
+		models     []string
+		currentRPM int64
+		currentTPM int64
+	)
+
+	g := new(errgroup.Group)
+
+	g.Go(func() error {
+		var err error
+
+		chartData, err = getChartDataMinute(
+			start, end, channelID, modelName, timeSpan, timezone, fields,
+		)
+
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		channels, err = GetUsedChannelsMinute(start, end)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		models, err = GetUsedModelsMinute(channelID, start, end)
+		return err
+	})
+
+	g.Go(func() error {
+		currentRPM, currentTPM = getCurrentRPM(channelID, modelName)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	dashboardResponse := sumDashboardResponse(chartData)
+	dashboardResponse.Channels = channels
+	dashboardResponse.Models = models
+	dashboardResponse.RPM = currentRPM
+	dashboardResponse.TPM = currentTPM
+
+	return &dashboardResponse, nil
+}
+
+func getGroupDashboardDataMinute(
+	group string,
+	start, end time.Time,
+	tokenName string,
+	modelName string,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) (*GroupDashboardResponse, error) {
+	if group == "" {
+		return nil, errors.New("group is required")
+	}
+
+	if end.IsZero() {
+		end = time.Now()
+	} else if end.Before(start) {
+		return nil, errors.New("end time is before start time")
+	}
+
+	var (
+		chartData  []ChartData
+		tokenNames []string
+		models     []string
+		currentRPM int64
+		currentTPM int64
+	)
+
+	g := new(errgroup.Group)
+
+	g.Go(func() error {
+		var err error
+
+		chartData, err = getGroupChartDataMinute(
+			group,
+			start,
+			end,
+			tokenName,
+			modelName,
+			timeSpan,
+			timezone,
+			fields,
+		)
+
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		tokenNames, err = GetGroupUsedTokenNamesMinute(group, start, end)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		models, err = GetGroupUsedModelsMinute(group, tokenName, start, end)
+		return err
+	})
+
+	g.Go(func() error {
+		currentRPM, currentTPM = getGroupCurrentRPM(group, tokenName, modelName)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	dashboardResponse := sumDashboardResponse(chartData)
+	dashboardResponse.Models = models
+	dashboardResponse.RPM = currentRPM
+	dashboardResponse.TPM = currentTPM
+
+	return &GroupDashboardResponse{
+		DashboardResponse: dashboardResponse,
+		TokenNames:        tokenNames,
+	}, nil
+}
+
+type SummaryDataV2 struct {
+	Timestamp int64  `json:"timestamp,omitempty"`
+	ChannelID int    `json:"channel_id,omitempty"`
+	GroupID   string `json:"group_id,omitempty"`
+	TokenName string `json:"token_name,omitempty"`
+	Model     string `json:"model"`
+
+	SummaryDataSet
+	ServiceTierFlex     SummaryDataSet `json:"service_tier_flex,omitempty"     gorm:"embedded;embeddedPrefix:service_tier_flex_"`
+	ServiceTierPriority SummaryDataSet `json:"service_tier_priority,omitempty" gorm:"embedded;embeddedPrefix:service_tier_priority_"`
+	ClaudeLongContext   SummaryDataSet `json:"claude_long_context,omitempty"   gorm:"embedded;embeddedPrefix:claude_long_context_"`
+
+	MaxRPM int64 `json:"max_rpm"`
+	MaxTPM int64 `json:"max_tpm"`
+}
+
+type TimeSummaryDataV2 struct {
+	Timestamp int64           `json:"timestamp"`
+	Summary   []SummaryDataV2 `json:"summary"`
+}
+
+type DashboardV2Response struct {
+	TimeSeries []TimeSummaryDataV2 `json:"time_series"`
+	RPM        int64               `json:"rpm"`
+	TPM        int64               `json:"tpm"`
+	Channels   []int               `json:"channels,omitempty"`
+	Models     []string            `json:"models,omitempty"`
+}
+
+type GroupDashboardV2Response struct {
+	DashboardV2Response
+	TokenNames []string `json:"token_names"`
+}
+
+type (
+	DashboardV3Response      = DashboardV2Response
+	GroupDashboardV3Response = GroupDashboardV2Response
+)
+
+func GetDashboardV2Data(
+	channelID int,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) (*DashboardV2Response, error) {
+	var (
+		timeSeries []TimeSummaryDataV2
+		currentRPM int64
+		currentTPM int64
+		channels   []int
+		models     []string
+	)
+
+	g := new(errgroup.Group)
+
+	g.Go(func() error {
+		var err error
+
+		timeSeries, err = GetTimeSeriesModelData(
+			channelID, modelName, start, end, timeSpan, timezone, fields,
+		)
+
+		return err
+	})
+
+	g.Go(func() error {
+		currentRPM, currentTPM = getCurrentRPM(channelID, modelName)
+		return nil
+	})
+
+	g.Go(func() error {
+		var err error
+
+		channels, err = GetUsedChannels(start, end)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		models, err = GetUsedModels(channelID, start, end)
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return &DashboardV2Response{
+		TimeSeries: timeSeries,
+		RPM:        currentRPM,
+		TPM:        currentTPM,
+		Channels:   channels,
+		Models:     models,
+	}, nil
+}
+
+func GetGroupDashboardV2Data(
+	group string,
+	tokenName string,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) (*GroupDashboardV2Response, error) {
+	var (
+		timeSeries []TimeSummaryDataV2
+		currentRPM int64
+		currentTPM int64
+		models     []string
+		tokenNames []string
+	)
+
+	g := new(errgroup.Group)
+
+	g.Go(func() error {
+		var err error
+
+		timeSeries, err = GetGroupTimeSeriesModelData(
+			group, tokenName, modelName, start, end, timeSpan, timezone, fields,
+		)
+
+		return err
+	})
+
+	g.Go(func() error {
+		currentRPM, currentTPM = getGroupCurrentRPM(group, tokenName, modelName)
+		return nil
+	})
+
+	g.Go(func() error {
+		var err error
+
+		models, err = GetGroupUsedModels(group, tokenName, start, end)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+
+		tokenNames, err = GetGroupUsedTokenNames(group, start, end)
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return &GroupDashboardV2Response{
+		DashboardV2Response: DashboardV2Response{
+			TimeSeries: timeSeries,
+			RPM:        currentRPM,
+			TPM:        currentTPM,
+			Models:     models,
+		},
+		TokenNames: tokenNames,
+	}, nil
+}
+
+// V3 wrapper functions - same as V2 since types are aliases
+func GetDashboardV3Data(
+	channelID int,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) (*DashboardV3Response, error) {
+	return GetDashboardV2Data(channelID, modelName, start, end, timeSpan, timezone, fields)
+}
+
+func GetGroupDashboardV3Data(
+	group string,
+	tokenName string,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) (*GroupDashboardV3Response, error) {
+	return GetGroupDashboardV2Data(
+		group,
+		tokenName,
+		modelName,
+		start,
+		end,
+		timeSpan,
+		timezone,
+		fields,
+	)
+}
+
+func getCurrentRPM(channelID int, modelName string) (int64, int64) {
+	now := time.Now()
+	recentStart := now.Add(-2 * time.Minute).Unix()
+	recentEnd := now.Unix()
+
+	query := LogDB.Model(&SummaryMinute{}).
+		Where("minute_timestamp >= ? AND minute_timestamp <= ?", recentStart, recentEnd)
+
+	if channelID != 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	type Result struct {
+		RPM int64 `json:"rpm"`
+		TPM int64 `json:"tpm"`
+	}
+
+	var result Result
+
+	err := query.
+		Select("SUM(request_count) as rpm, SUM(total_tokens) as tpm").
+		Where("minute_timestamp = (?)",
+			LogDB.Model(&SummaryMinute{}).
+				Select("MAX(minute_timestamp)").
+				Where("minute_timestamp >= ? AND minute_timestamp <= ?", recentStart, recentEnd).
+				Scopes(func(db *gorm.DB) *gorm.DB {
+					if channelID != 0 {
+						db = db.Where("channel_id = ?", channelID)
+					}
+
+					if modelName != "" {
+						db = db.Where("model = ?", modelName)
+					}
+
+					return db
+				}),
+		).
+		Find(&result).Error
+	if err != nil {
+		return 0, 0
+	}
+
+	return result.RPM, result.TPM
+}
+
+func getGroupCurrentRPM(group, tokenName, modelName string) (int64, int64) {
+	now := time.Now()
+	recentStart := now.Add(-2 * time.Minute).Unix()
+	recentEnd := now.Unix()
+
+	query := LogDB.Model(&GroupSummaryMinute{}).
+		Where("group_id = ?", group).
+		Where("minute_timestamp >= ? AND minute_timestamp <= ?", recentStart, recentEnd)
+
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	type Result struct {
+		RPM int64 `json:"rpm"`
+		TPM int64 `json:"tpm"`
+	}
+
+	var result Result
+
+	err := query.
+		Select("SUM(request_count) as rpm, SUM(total_tokens) as tpm").
+		Where("minute_timestamp = (?)",
+			LogDB.Model(&GroupSummaryMinute{}).
+				Select("MAX(minute_timestamp)").
+				Where("group_id = ?", group).
+				Where("minute_timestamp >= ? AND minute_timestamp <= ?", recentStart, recentEnd).
+				Scopes(func(db *gorm.DB) *gorm.DB {
+					if tokenName != "" {
+						db = db.Where("token_name = ?", tokenName)
+					}
+
+					if modelName != "" {
+						db = db.Where("model = ?", modelName)
+					}
+
+					return db
+				}),
+		).
+		Find(&result).Error
+	if err != nil {
+		return 0, 0
+	}
+
+	return result.RPM, result.TPM
+}
+
+func GetTimeSeriesModelData(
+	channelID int,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) ([]TimeSummaryDataV2, error) {
+	if timeSpan == TimeSpanMinute {
+		return getTimeSeriesModelDataMinute(
+			channelID, modelName, start, end, timeSpan, timezone, fields,
+		)
+	}
+
+	if end.IsZero() {
+		end = time.Now()
+	} else if end.Before(start) {
+		return nil, errors.New("end time is before start time")
+	}
+
+	query := LogDB.Model(&Summary{})
+
+	if channelID != 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("hour_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("hour_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("hour_timestamp <= ?", end.Unix())
+	}
+
+	selectFields := fields.BuildSelectFieldsV2("hour_timestamp", "channel_id, model")
+
+	var rawData []SummaryDataV2
+
+	err := query.
+		Select(selectFields).
+		Group("timestamp, channel_id, model").
+		Find(&rawData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rawData) > 0 {
+		err = batchFillMaxValues(rawData, channelID, modelName, start, end)
+		if err != nil {
+			return nil, err
+		}
+
+		if timeSpan != TimeSpanHour {
+			rawData = aggregatToSpan(rawData, timeSpan, timezone)
+		}
+	}
+
+	result := convertToTimeModelData(rawData)
+
+	slices.SortFunc(result, func(a, b TimeSummaryDataV2) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return result, nil
+}
+
+func GetGroupTimeSeriesModelData(
+	group string,
+	tokenName string,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) ([]TimeSummaryDataV2, error) {
+	if timeSpan == TimeSpanMinute {
+		return getGroupTimeSeriesModelDataMinute(
+			group,
+			tokenName,
+			modelName,
+			start,
+			end,
+			timeSpan,
+			timezone,
+			fields,
+		)
+	}
+
+	if end.IsZero() {
+		end = time.Now()
+	} else if end.Before(start) {
+		return nil, errors.New("end time is before start time")
+	}
+
+	query := LogDB.Model(&GroupSummary{}).
+		Where("group_id = ?", group)
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("hour_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("hour_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("hour_timestamp <= ?", end.Unix())
+	}
+
+	selectFields := fields.BuildSelectFieldsV2("hour_timestamp", "group_id, token_name, model")
+
+	var rawData []SummaryDataV2
+
+	err := query.
+		Select(selectFields).
+		Group("timestamp, group_id, token_name, model").
+		Find(&rawData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if len(rawData) > 0 {
+		err = batchFillGroupMaxValues(rawData, group, tokenName, modelName, start, end)
+		if err != nil {
+			return nil, err
+		}
+
+		if timeSpan != TimeSpanHour {
+			rawData = aggregatToSpanGroup(rawData, timeSpan, timezone)
+		}
+	}
+
+	result := convertToTimeModelData(rawData)
+
+	slices.SortFunc(result, func(a, b TimeSummaryDataV2) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return result, nil
+}
+
+func batchFillMaxValues(
+	rawData []SummaryDataV2,
+	channelID int,
+	modelName string,
+	start, end time.Time,
+) error {
+	minuteQuery := LogDB.Model(&SummaryMinute{})
+
+	if channelID != 0 {
+		minuteQuery = minuteQuery.Where("channel_id = ?", channelID)
+	}
+
+	if modelName != "" {
+		minuteQuery = minuteQuery.Where("model = ?", modelName)
+	}
+
+	minuteStart := start.Unix()
+
+	minuteEnd := end.Unix()
+	if end.IsZero() {
+		minuteEnd = time.Now().Unix()
+	}
+
+	minuteQuery = minuteQuery.Where(
+		"minute_timestamp >= ? AND minute_timestamp <= ?",
+		minuteStart,
+		minuteEnd,
+	)
+
+	type MaxResult struct {
+		HourTimestamp int64  `json:"hour_timestamp"`
+		ChannelID     int    `json:"channel_id"`
+		Model         string `json:"model"`
+		MaxRPM        int64  `json:"max_rpm"`
+		MaxTPM        int64  `json:"max_tpm"`
+	}
+
+	var maxResults []MaxResult
+
+	err := minuteQuery.
+		Select(`
+			(minute_timestamp - minute_timestamp % 3600) as hour_timestamp,
+			channel_id,
+			model,
+			MAX(request_count) as max_rpm,
+			MAX(total_tokens) as max_tpm
+		`).
+		Group("hour_timestamp, channel_id, model").
+		Find(&maxResults).Error
+	if err != nil {
+		return err
+	}
+
+	type Key struct {
+		HourTimestamp int64
+		ChannelID     int
+		Model         string
+	}
+
+	maxMap := make(map[Key]MaxResult)
+	for _, result := range maxResults {
+		key := Key{
+			HourTimestamp: result.HourTimestamp,
+			ChannelID:     result.ChannelID,
+			Model:         result.Model,
+		}
+		maxMap[key] = result
+	}
+
+	for i := range rawData {
+		data := &rawData[i]
+
+		key := Key{
+			HourTimestamp: data.Timestamp,
+			ChannelID:     data.ChannelID,
+			Model:         data.Model,
+		}
+		if maxResult, exists := maxMap[key]; exists {
+			data.MaxRPM = maxResult.MaxRPM
+			data.MaxTPM = maxResult.MaxTPM
+		}
+	}
+
+	return nil
+}
+
+func batchFillGroupMaxValues(
+	rawData []SummaryDataV2,
+	group, tokenName, modelName string,
+	start, end time.Time,
+) error {
+	minuteQuery := LogDB.Model(&GroupSummaryMinute{}).
+		Where("group_id = ?", group)
+
+	if tokenName != "" {
+		minuteQuery = minuteQuery.Where("token_name = ?", tokenName)
+	}
+
+	if modelName != "" {
+		minuteQuery = minuteQuery.Where("model = ?", modelName)
+	}
+
+	minuteStart := start.Unix()
+
+	minuteEnd := end.Unix()
+	if end.IsZero() {
+		minuteEnd = time.Now().Unix()
+	}
+
+	minuteQuery = minuteQuery.Where(
+		"minute_timestamp >= ? AND minute_timestamp <= ?",
+		minuteStart,
+		minuteEnd,
+	)
+
+	type MaxResult struct {
+		HourTimestamp int64  `json:"hour_timestamp"`
+		GroupID       string `json:"group_id"`
+		TokenName     string `json:"token_name"`
+		Model         string `json:"model"`
+		MaxRPM        int64  `json:"max_rpm"`
+		MaxTPM        int64  `json:"max_tpm"`
+	}
+
+	var maxResults []MaxResult
+
+	err := minuteQuery.
+		Select(`
+			(minute_timestamp - minute_timestamp % 3600) as hour_timestamp,
+			group_id,
+			token_name,
+			model,
+			MAX(request_count) as max_rpm,
+			MAX(total_tokens) as max_tpm
+		`).
+		Group("hour_timestamp, group_id, token_name, model").
+		Find(&maxResults).Error
+	if err != nil {
+		return err
+	}
+
+	type Key struct {
+		HourTimestamp int64
+		GroupID       string
+		TokenName     string
+		Model         string
+	}
+
+	maxMap := make(map[Key]MaxResult)
+	for _, result := range maxResults {
+		key := Key{
+			HourTimestamp: result.HourTimestamp,
+			GroupID:       result.GroupID,
+			TokenName:     result.TokenName,
+			Model:         result.Model,
+		}
+		maxMap[key] = result
+	}
+
+	for i := range rawData {
+		data := &rawData[i]
+
+		key := Key{
+			HourTimestamp: data.Timestamp,
+			GroupID:       data.GroupID,
+			TokenName:     data.TokenName,
+			Model:         data.Model,
+		}
+		if maxResult, exists := maxMap[key]; exists {
+			data.MaxRPM = maxResult.MaxRPM
+			data.MaxTPM = maxResult.MaxTPM
+		}
+	}
+
+	return nil
+}
+
+func getTimeSeriesModelDataMinute(
+	channelID int,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) ([]TimeSummaryDataV2, error) {
+	if end.IsZero() {
+		end = time.Now()
+	} else if end.Before(start) {
+		return nil, errors.New("end time is before start time")
+	}
+
+	query := LogDB.Model(&SummaryMinute{})
+
+	if channelID != 0 {
+		query = query.Where("channel_id = ?", channelID)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("minute_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("minute_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("minute_timestamp <= ?", end.Unix())
+	}
+
+	selectFields := fields.BuildSelectFieldsV2("minute_timestamp", "channel_id, model")
+
+	var rawData []SummaryDataV2
+
+	err := query.
+		Select(selectFields).
+		Group("timestamp, channel_id, model").
+		Find(&rawData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for i, data := range rawData {
+		rawData[i].MaxRPM = data.RequestCount
+		rawData[i].MaxTPM = int64(data.TotalTokens)
+	}
+
+	if len(rawData) > 0 && timeSpan != TimeSpanMinute {
+		rawData = aggregatToSpan(rawData, timeSpan, timezone)
+	}
+
+	result := convertToTimeModelData(rawData)
+
+	slices.SortFunc(result, func(a, b TimeSummaryDataV2) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return result, nil
+}
+
+func getGroupTimeSeriesModelDataMinute(
+	group string,
+	tokenName string,
+	modelName string,
+	start, end time.Time,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+	fields SummarySelectFields,
+) ([]TimeSummaryDataV2, error) {
+	if end.IsZero() {
+		end = time.Now()
+	} else if end.Before(start) {
+		return nil, errors.New("end time is before start time")
+	}
+
+	query := LogDB.Model(&GroupSummaryMinute{}).
+		Where("group_id = ?", group)
+	if tokenName != "" {
+		query = query.Where("token_name = ?", tokenName)
+	}
+
+	if modelName != "" {
+		query = query.Where("model = ?", modelName)
+	}
+
+	switch {
+	case !start.IsZero() && !end.IsZero():
+		query = query.Where("minute_timestamp BETWEEN ? AND ?", start.Unix(), end.Unix())
+	case !start.IsZero():
+		query = query.Where("minute_timestamp >= ?", start.Unix())
+	case !end.IsZero():
+		query = query.Where("minute_timestamp <= ?", end.Unix())
+	}
+
+	selectFields := fields.BuildSelectFieldsV2("minute_timestamp", "group_id, token_name, model")
+
+	var rawData []SummaryDataV2
+
+	err := query.
+		Select(selectFields).
+		Group("timestamp, group_id, token_name, model").
+		Find(&rawData).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for i, data := range rawData {
+		rawData[i].MaxRPM = data.RequestCount
+		rawData[i].MaxTPM = int64(data.TotalTokens)
+	}
+
+	if len(rawData) > 0 && timeSpan != TimeSpanMinute {
+		rawData = aggregatToSpanGroup(rawData, timeSpan, timezone)
+	}
+
+	result := convertToTimeModelData(rawData)
+
+	slices.SortFunc(result, func(a, b TimeSummaryDataV2) int {
+		return cmp.Compare(a.Timestamp, b.Timestamp)
+	})
+
+	return result, nil
+}
+
+func aggregatToSpan(
+	minuteData []SummaryDataV2,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+) []SummaryDataV2 {
+	if timezone == nil {
+		timezone = time.Local
+	}
+
+	type AggKey struct {
+		Timestamp int64
+		ChannelID int
+		Model     string
+	}
+
+	dataMap := make(map[AggKey]SummaryDataV2)
+
+	for _, data := range minuteData {
+		t := time.Unix(data.Timestamp, 0).In(timezone)
+
+		key := AggKey{
+			ChannelID: data.ChannelID,
+			Model:     data.Model,
+		}
+
+		switch timeSpan {
+		case TimeSpanMonth:
+			startOfMonth := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, timezone)
+			key.Timestamp = startOfMonth.Unix()
+		case TimeSpanDay:
+			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, timezone)
+			key.Timestamp = startOfDay.Unix()
+		case TimeSpanHour:
+			startOfHour := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, timezone)
+			key.Timestamp = startOfHour.Unix()
+		case TimeSpanMinute:
+			fallthrough
+		default:
+			startOfMinute := time.Date(
+				t.Year(),
+				t.Month(),
+				t.Day(),
+				t.Hour(),
+				t.Minute(),
+				0,
+				0,
+				timezone,
+			)
+			key.Timestamp = startOfMinute.Unix()
+		}
+
+		currentData, exists := dataMap[key]
+		if !exists {
+			currentData = SummaryDataV2{
+				Timestamp: key.Timestamp,
+				ChannelID: data.ChannelID,
+				Model:     data.Model,
+			}
+		}
+
+		currentData.Add(data.SummaryDataSet)
+		currentData.ServiceTierFlex.Add(data.ServiceTierFlex)
+		currentData.ServiceTierPriority.Add(data.ServiceTierPriority)
+		currentData.ClaudeLongContext.Add(data.ClaudeLongContext)
+
+		if data.MaxRPM > currentData.MaxRPM {
+			currentData.MaxRPM = data.MaxRPM
+		}
+
+		if data.MaxTPM > currentData.MaxTPM {
+			currentData.MaxTPM = data.MaxTPM
+		}
+
+		dataMap[key] = currentData
+	}
+
+	result := make([]SummaryDataV2, 0, len(dataMap))
+	for _, data := range dataMap {
+		result = append(result, data)
+	}
+
+	return result
+}
+
+func aggregatToSpanGroup(
+	minuteData []SummaryDataV2,
+	timeSpan TimeSpanType,
+	timezone *time.Location,
+) []SummaryDataV2 {
+	if timezone == nil {
+		timezone = time.Local
+	}
+
+	type AggKey struct {
+		Timestamp int64
+		GroupID   string
+		TokenName string
+		Model     string
+	}
+
+	dataMap := make(map[AggKey]SummaryDataV2)
+
+	for _, data := range minuteData {
+		t := time.Unix(data.Timestamp, 0).In(timezone)
+
+		key := AggKey{
+			GroupID:   data.GroupID,
+			TokenName: data.TokenName,
+			Model:     data.Model,
+		}
+
+		switch timeSpan {
+		case TimeSpanMonth:
+			startOfMonth := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, timezone)
+			key.Timestamp = startOfMonth.Unix()
+		case TimeSpanDay:
+			startOfDay := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, timezone)
+			key.Timestamp = startOfDay.Unix()
+		case TimeSpanHour:
+			startOfHour := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, timezone)
+			key.Timestamp = startOfHour.Unix()
+		case TimeSpanMinute:
+			fallthrough
+		default:
+			startOfMinute := time.Date(
+				t.Year(),
+				t.Month(),
+				t.Day(),
+				t.Hour(),
+				t.Minute(),
+				0,
+				0,
+				timezone,
+			)
+			key.Timestamp = startOfMinute.Unix()
+		}
+
+		currentData, exists := dataMap[key]
+		if !exists {
+			currentData = SummaryDataV2{
+				Timestamp: key.Timestamp,
+				GroupID:   data.GroupID,
+				TokenName: data.TokenName,
+				Model:     data.Model,
+			}
+		}
+
+		currentData.Add(data.SummaryDataSet)
+		currentData.ServiceTierFlex.Add(data.ServiceTierFlex)
+		currentData.ServiceTierPriority.Add(data.ServiceTierPriority)
+		currentData.ClaudeLongContext.Add(data.ClaudeLongContext)
+
+		if data.MaxRPM > currentData.MaxRPM {
+			currentData.MaxRPM = data.MaxRPM
+		}
+
+		if data.MaxTPM > currentData.MaxTPM {
+			currentData.MaxTPM = data.MaxTPM
+		}
+
+		dataMap[key] = currentData
+	}
+
+	result := make([]SummaryDataV2, 0, len(dataMap))
+	for _, data := range dataMap {
+		result = append(result, data)
+	}
+
+	return result
+}
+
+func convertToTimeModelData(rawData []SummaryDataV2) []TimeSummaryDataV2 {
+	timeMap := make(map[int64][]SummaryDataV2)
+
+	for _, data := range rawData {
+		timeMap[data.Timestamp] = append(timeMap[data.Timestamp], data)
+	}
+
+	result := make([]TimeSummaryDataV2, 0, len(timeMap))
+	for timestamp, models := range timeMap {
+		slices.SortFunc(models, func(a, b SummaryDataV2) int {
+			if a.UsedAmount != b.UsedAmount {
+				return cmp.Compare(b.UsedAmount, a.UsedAmount)
+			}
+
+			if a.TotalTokens != b.TotalTokens {
+				return cmp.Compare(b.TotalTokens, a.TotalTokens)
+			}
+
+			if a.RequestCount != b.RequestCount {
+				return cmp.Compare(b.RequestCount, a.RequestCount)
+			}
+
+			return cmp.Compare(a.Model, b.Model)
+		})
+
+		result = append(result, TimeSummaryDataV2{
+			Timestamp: timestamp,
+			Summary:   models,
+		})
+	}
+
+	return result
+}

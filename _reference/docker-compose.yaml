@@ -1,0 +1,53 @@
+version: "3.3"
+services:
+  aiproxy:
+    image: 'ghcr.io/labring/aiproxy:latest'
+    container_name: aiproxy
+    restart: unless-stopped
+    depends_on:
+      pgsql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000/tcp"
+    environment:
+      - ADMIN_KEY=aiproxy
+      - LOG_DETAIL_STORAGE_HOURS=1
+      - TZ=Asia/Shanghai
+      - SQL_DSN=postgres://postgres:aiproxy@pgsql:5432/aiproxy
+      - REDIS=redis://redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgsql:
+    image: "postgres:latest"
+    restart: unless-stopped
+    container_name: postgres
+    volumes:
+      - ./pgsql:/var/lib/postgresql/data
+    environment:
+      TZ: Asia/Shanghai
+      POSTGRES_USER: postgres
+      POSTGRES_DB: aiproxy
+      POSTGRES_PASSWORD: aiproxy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "aiproxy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: "redis:latest"
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - ./redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

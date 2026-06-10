@@ -1,0 +1,71 @@
+{
+  "backends": [
+    {
+      "id": "7bea4093-216a-4693-983c-cb0c79a71a10",
+      "name": "ds",
+      "provider": "anthropic",
+      "base_url": "https://api.deepseek.com/anthropic",
+      "api_key_encrypted": "JUlZC+DxOzg0Fyn76c+dLR7e+NheHH43Phgr74yH62Go/1yz1ocT0pE2RoWWh9sJ7xQsTJsO5dpUcnRk+xGV",
+      "models": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "auto"
+      ],
+      "model_mapping": {
+        "auto": "deepseek-v4-pro"
+      },
+      "weight": 10,
+      "cost_tier": "pay_per_token",
+      "max_context_tokens": 0,
+      "max_rpm": 0,
+      "max_concurrent": 10,
+      "timeout_seconds": 120,
+      "status": "active",
+      "token_balance": 0,
+      "token_used": 164,
+      "quota_tokens_total": 0,
+      "quota_tokens_remaining": 0,
+      "quota_requests_total": 0,
+      "quota_requests_remaining": 0,
+      "last_health_check": "0001-01-01T00:00:00Z",
+      "created_at": "2026-06-09T07:10:44.002962337Z",
+      "updated_at": "2026-06-10T05:20:40.841933621Z"
+    },
+    {
+      "id": "2c763e0f-d294-4d73-af38-466f323e22dd",
+      "name": "kimi",
+      "provider": "anthropic",
+      "base_url": "https://api.kimi.com/coding/",
+      "api_key_encrypted": "0AsGtzX2sbsRx7SQrNoF7wGWrX4FvIPeWE8djc8JnIF69d2xgGKo75mIewtjuinWOxxdVu1u8KnW447paJgmMnPLZQdg1VP6RotQoaW3xaQd2RXfQQ9DqQ+fWWSTEiQkpX90Dg==",
+      "models": [
+        "kimi-2.6",
+        "auto"
+      ],
+      "model_mapping": {
+        "auto": "kimi-2.6"
+      },
+      "weight": 10,
+      "cost_tier": "prepaid",
+      "max_context_tokens": 0,
+      "max_rpm": 0,
+      "max_concurrent": 10,
+      "timeout_seconds": 120,
+      "status": "active",
+      "token_balance": 0,
+      "token_used": 0,
+      "quota_tokens_total": 0,
+      "quota_tokens_remaining": 0,
+      "quota_requests_total": 0,
+      "quota_requests_remaining": 0,
+      "last_health_check": "0001-01-01T00:00:00Z",
+      "created_at": "2026-06-09T09:02:57.98308547Z",
+      "updated_at": "2026-06-10T05:20:33.068952002Z"
+    }
+  ],
+  "strategies": {
+    "auto": "round_robin",
+    "deepseek-v4-flash": "priority",
+    "deepseek-v4-pro": "priority",
+    "kimi-2.6": "priority"
+  }
+}

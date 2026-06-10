@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Proxy Admin</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 0;
+    background: #f0f2f5; color: #222;
+    font-size: 14px; line-height: 1.5;
+  }
+  header {
+    background: #1a1a2e; color: #fff;
+    padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  .container { max-width: 960px; margin: 0 auto; padding: 20px; }
+  .card {
+    background: #fff; border-radius: 6px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .card-head {
+    background: #fafafa; padding: 12px 16px;
+    border-bottom: 1px solid #eee;
+    font-weight: 600; font-size: 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card-body { padding: 16px; }
+  table {
+    width: 100%; border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #fafafa; font-weight: 600; color: #555; }
+  tr:hover td { background: #f8f9fa; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 6px 12px; border-radius: 4px; border: 1px solid #ccc;
+    background: #fff; cursor: pointer; font-size: 13px;
+  }
+  .btn:hover { background: #f5f5f5; }
+  .btn-primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .btn-primary:hover { background: #1557b0; }
+  .btn-danger { background: #c5221f; color: #fff; border-color: #c5221f; }
+  .btn-danger:hover { background: #a50e0e; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: #e8f0fe; color: #1a73e8; font-size: 12px;
+  }
+  .tag.success { background: #e6f4ea; color: #137333; }
+  .tag.error { background: #fce8e8; color: #c5221f; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; margin-bottom: 4px; font-weight: 500; color: #444; }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px;
+    font-size: 13px; font-family: inherit;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+    outline: none; border-color: #1a73e8;
+  }
+  .form-row { display: flex; gap: 12px; }
+  .form-row .form-group { flex: 1; }
+  .key-box {
+    display: flex; align-items: center; gap: 8px;
+    background: #f5f5f5; padding: 6px 10px; border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px;
+  }
+  .key-box .key-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .key-box .key-text.hidden { filter: blur(4px); user-select: none; }
+  .icon-btn {
+    background: none; border: none; cursor: pointer; padding: 2px; color: #666;
+    display: inline-flex; align-items: center;
+  }
+  .icon-btn:hover { color: #222; }
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal {
+    background: #fff; border-radius: 6px; width: 520px; max-width: 92vw;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  }
+  .modal-head {
+    padding: 14px 16px; border-bottom: 1px solid #eee;
+    font-weight: 600; display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-body { padding: 16px; max-height: 72vh; overflow: auto; }
+  .modal-foot { padding: 12px 16px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 8px; }
+  .hidden { display: none !important; }
+  .empty { color: #888; padding: 20px; text-align: center; }
+  .alert { padding: 10px 12px; border-radius: 4px; margin-bottom: 12px; font-size: 13px; }
+  .alert-err { background: #fce8e8; color: #a50e0e; border: 1px solid #f5c6cb; }
+  .alert-ok { background: #e6f4ea; color: #137333; border: 1px solid #c3e6cb; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Proxy Admin</h1>
+  <div id="auth-bar">
+    <input id="admin-key" type="password" placeholder="Admin key" style="padding:6px 10px;border-radius:4px;border:1px solid #444;background:#222;color:#fff;width:160px;">
+    <button class="btn btn-primary btn-sm" onclick="saveKey()">Set Key</button>
+  </div>
+</header>
+
+<div class="container">
+  <div id="msg"></div>
+
+  <div class="card">
+    <div class="card-head">
+      Backends
+      <button class="btn btn-primary btn-sm" onclick="openCreate()">+ Add Backend</button>
+    </div>
+    <div class="card-body" id="backends-body"><div class="empty">Enter admin key and click "Set Key" to load.</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">Strategy Configs</div>
+    <div class="card-body" id="strategies-body"><div class="empty">Enter admin key to load.</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">System Info</div>
+    <div class="card-body" id="sys-info"><div class="empty">Enter admin key to load.</div></div>
+  </div>
+</div>
+
+<div id="modal" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><span id="modal-title">Backend</span><button class="icon-btn" onclick="closeModal()">&#10005;</button></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot" id="modal-foot"></div>
+  </div>
+</div>
+
+<script>
+let ADMIN_KEY = localStorage.getItem('aiproxy_admin_key') || '';
+if (ADMIN_KEY) document.getElementById('admin-key').value = ADMIN_KEY;
+
+function saveKey() {
+  ADMIN_KEY = document.getElementById('admin-key').value.trim();
+  localStorage.setItem('aiproxy_admin_key', ADMIN_KEY);
+  loadAll();
+}
+
+function apiHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ADMIN_KEY };
+}
+
+function showMsg(text, ok) {
+  const el = document.getElementById('msg');
+  el.innerHTML = '<div class="alert ' + (ok ? 'alert-ok' : 'alert-err') + '">' + text + '</div>';
+  setTimeout(() => el.innerHTML = '', 4000);
+}
+
+async function apiGet(url) {
+  const r = await fetch(url, { headers: { 'Authorization': 'Bearer ' + ADMIN_KEY } });
+  if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+  return r.json();
+}
+
+async function apiPost(url, data) {
+  const r = await fetch(url, { method: 'POST', headers: apiHeaders(), body: JSON.stringify(data) });
+  if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+  return r.json();
+}
+
+async function apiPut(url, data) {
+  const r = await fetch(url, { method: 'PUT', headers: apiHeaders(), body: JSON.stringify(data) });
+  if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+  return r.json();
+}
+
+async function apiDel(url) {
+  const r = await fetch(url, { method: 'DELETE', headers: apiHeaders() });
+  if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+}
+
+function toggleKey(id, btn) {
+  const span = document.getElementById('k-' + id);
+  if (span.classList.contains('hidden')) {
+    span.classList.remove('hidden'); btn.textContent = '👁️';
+  } else {
+    span.classList.add('hidden'); btn.textContent = '👁‍🗨️';
+  }
+}
+
+async function loadBackends() {
+  const el = document.getElementById('backends-body');
+  try {
+    const list = await apiGet('/api/backends');
+    const keys = {};
+    for (const b of list) {
+      try { const k = await apiGet('/api/backends/' + b.id + '/key'); keys[b.id] = k.api_key || ''; } catch (e) { keys[b.id] = '(error)'; }
+    }
+    let html = '<table><thead><tr><th>Name</th><th>Provider</th><th>Base URL</th><th>Models</th><th>API Key</th><th>Status</th><th style="width:120px">Actions</th></tr></thead><tbody>';
+    for (const b of list) {
+      const keyVal = keys[b.id] || '';
+      html += '<tr>';
+      html += '<td><strong>' + esc(b.name) + '</strong></td>';
+      html += '<td>' + esc(b.provider) + '</td>';
+      html += '<td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;">' + esc(b.base_url) + '</td>';
+      html += '<td>' + (b.models || []).map(m => '<span class="tag">' + esc(m) + '</span>').join(' ') + '</td>';
+      html += '<td><div class="key-box"><span id="k-' + b.id + '" class="key-text hidden">' + esc(keyVal) + '</span><button class="icon-btn" onclick="toggleKey(\'' + b.id + '\', this)">👁‍🗨️</button></div></td>';
+      html += '<td><span class="tag ' + (b.status === 'active' ? 'success' : 'error') + '">' + esc(b.status) + '</span></td>';
+      html += '<td><button class="btn btn-sm" onclick="openEdit(\'' + b.id + '\')">Edit</button> <button class="btn btn-sm btn-danger" onclick="delBackend(\'' + b.id + '\')">Del</button></td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function loadStrategies() {
+  const el = document.getElementById('strategies-body');
+  try {
+    const configs = await apiGet('/api/strategies/config');
+    if (!configs || Object.keys(configs).length === 0) { el.innerHTML = '<div class="empty">No strategy configs set.</div>'; return; }
+    let html = '<table><thead><tr><th>Model</th><th>Strategy</th></tr></thead><tbody>';
+    for (const [model, strategy] of Object.entries(configs)) {
+      html += '<tr><td>' + esc(model) + '</td><td><span class="tag">' + esc(strategy) + '</span></td></tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch (e) {
+    el.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function loadSys() {
+  const el = document.getElementById('sys-info');
+  try {
+    const h = await apiGet('/api/health');
+    el.innerHTML = '<div class="form-row"><div class="form-group"><label>Status</label><div><span class="tag success">' + esc(h.status) + '</span></div></div><div class="form-group"><label>Time</label><div>' + esc(h.time) + '</div></div></div>';
+  } catch (e) {
+    el.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function loadAll() { loadBackends(); loadStrategies(); loadSys(); }
+
+function esc(s) {
+  const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML;
+}
+
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+function openModal(title, bodyHtml, footHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-foot').innerHTML = footHtml || '';
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function backendForm(b) {
+  b = b || {};
+  const models = (b.models || []).join(', ');
+  const mapping = b.model_mapping ? JSON.stringify(b.model_mapping, null, 2) : '{}';
+  return '' +
+    '<div class="form-row"><div class="form-group"><label>Name</label><input id="f-name" value="' + esc(b.name || '') + '"></div><div class="form-group"><label>Provider</label><select id="f-provider"><option value="openai" ' + (b.provider==='openai'?'selected':'') + '>openai</option><option value="anthropic" ' + (b.provider==='anthropic'?'selected':'') + '>anthropic</option><option value="custom" ' + (b.provider==='custom'?'selected':'') + '>custom</option></select></div></div>' +
+    '<div class="form-group"><label>Base URL</label><input id="f-base_url" value="' + esc(b.base_url || '') + '"></div>' +
+    '<div class="form-group"><label>API Key</label><input id="f-key" type="text" value="' + esc(b.api_key || '') + '" placeholder="Leave blank to keep unchanged when editing"></div>' +
+    '<div class="form-group"><label>Models (comma separated)</label><input id="f-models" value="' + esc(models) + '"></div>' +
+    '<div class="form-group"><label>Model Mapping (JSON)</label><textarea id="f-model_mapping" rows="3">' + esc(mapping) + '</textarea></div>' +
+    '<div class="form-row"><div class="form-group"><label>Weight</label><input id="f-weight" type="number" value="' + (b.weight || 10) + '"></div><div class="form-group"><label>Timeout (seconds)</label><input id="f-timeout" type="number" value="' + (b.timeout_seconds || 120) + '"></div></div>' +
+    '<div class="form-row"><div class="form-group"><label>Max RPM</label><input id="f-max_rpm" type="number" value="' + (b.max_rpm || 0) + '"></div><div class="form-group"><label>Max Concurrent</label><input id="f-max_concurrent" type="number" value="' + (b.max_concurrent || 10) + '"></div></div>' +
+    '<div class="form-group"><label>Cost Tier</label><select id="f-cost_tier"><option value="">default</option><option value="prepaid" ' + (b.cost_tier==='prepaid'?'selected':'') + '>prepaid</option><option value="pay_per_token" ' + (b.cost_tier==='pay_per_token'?'selected':'') + '>pay_per_token</option></select></div>';
+}
+
+function readBackendForm() {
+  let mapping = {};
+  try { mapping = JSON.parse(document.getElementById('f-model_mapping').value || '{}'); } catch (e) {}
+  return {
+    name: document.getElementById('f-name').value,
+    provider: document.getElementById('f-provider').value,
+    base_url: document.getElementById('f-base_url').value,
+    api_key: document.getElementById('f-key').value,
+    models: document.getElementById('f-models').value.split(',').map(s => s.trim()).filter(Boolean),
+    model_mapping: mapping,
+    weight: Number(document.getElementById('f-weight').value) || 10,
+    timeout_seconds: Number(document.getElementById('f-timeout').value) || 120,
+    max_rpm: Number(document.getElementById('f-max_rpm').value) || 0,
+    max_concurrent: Number(document.getElementById('f-max_concurrent').value) || 10,
+    cost_tier: document.getElementById('f-cost_tier').value,
+  };
+}
+
+function openCreate() {
+  openModal('Add Backend', backendForm(),
+    '<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="doCreate()">Create</button>');
+}
+
+async function doCreate() {
+  try { await apiPost('/api/backends', readBackendForm()); closeModal(); showMsg('Created', true); loadBackends(); }
+  catch (e) { showMsg(e.message, false); }
+}
+
+async function openEdit(id) {
+  try {
+    const list = await apiGet('/api/backends');
+    const b = list.find(x => x.id === id);
+    if (!b) return;
+    const keyData = await apiGet('/api/backends/' + id + '/key');
+    b.api_key = keyData.api_key || '';
+    openModal('Edit Backend', backendForm(b),
+      '<button class="btn" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="doEdit(\'' + id + '\')">Save</button>');
+  } catch (e) { showMsg(e.message, false); }
+}
+
+async function doEdit(id) {
+  try { await apiPut('/api/backends/' + id, readBackendForm()); closeModal(); showMsg('Saved', true); loadBackends(); }
+  catch (e) { showMsg(e.message, false); }
+}
+
+async function delBackend(id) {
+  if (!confirm('Delete this backend?')) return;
+  try { await apiDel('/api/backends/' + id); showMsg('Deleted', true); loadBackends(); }
+  catch (e) { showMsg(e.message, false); }
+}
+
+if (ADMIN_KEY) loadAll();
+</script>
+</body>
+</html>

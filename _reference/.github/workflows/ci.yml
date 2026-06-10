@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*.*.*"
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.yaml"
+  pull_request:
+    branches:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  golangci-lint-aiproxy:
+    name: Lint AI Proxy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "core/go.mod"
+
+      - name: Go test
+        working-directory: core
+        run: |
+          go test -v -timeout 30s -count=1 ./...
+
+      - name: Run Linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          working-directory: core
+          args: --color=always --path-mode=abs
+
+      - name: Run Fix Linter
+        uses: golangci/golangci-lint-action@v9
+        if: ${{ failure() }}
+        with:
+          install-mode: none
+          working-directory: core
+          args: --fix --color=always --path-mode=abs
+
+      - name: Auto Fix Diff Content
+        if: ${{ failure() }}
+        run: |
+          if git diff --exit-code --color=always; then
+            echo "No changes detected after auto-fix"
+          else
+            git diff --color=always
+            exit 1
+          fi
+
+  golangci-lint-mcpservers:
+    name: Lint MCP Servers
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "mcp-servers/go.mod"
+
+      - name: Go test
+        working-directory: mcp-servers
+        run: |
+          go test -v -timeout 30s -count=1 ./...
+
+      - name: Run Linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          working-directory: mcp-servers
+          args: --color=always --path-mode=abs
+
+      - name: Run Fix Linter
+        uses: golangci/golangci-lint-action@v9
+        if: ${{ failure() }}
+        with:
+          install-mode: none
+          working-directory: mcp-servers
+          args: --fix --color=always --path-mode=abs
+
+      - name: Auto Fix Diff Content
+        if: ${{ failure() }}
+        run: |
+          if git diff --exit-code --color=always; then
+            echo "No changes detected after auto-fix"
+          else
+            git diff --color=always
+            exit 1
+          fi
+
+  golangci-lint-openapimcp:
+    name: Lint OpneAPI MCP
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: "openapi-mcp/go.mod"
+
+      - name: Run Linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          working-directory: openapi-mcp
+          args: --color=always --path-mode=abs
+
+      - name: Run Fix Linter
+        uses: golangci/golangci-lint-action@v9
+        if: ${{ failure() }}
+        with:
+          install-mode: none
+          working-directory: openapi-mcp
+          args: --fix --color=always --path-mode=abs
+
+      - name: Auto Fix Diff Content
+        if: ${{ failure() }}
+        run: |
+          if git diff --exit-code --color=always; then
+            echo "No changes detected after auto-fix"
+          else
+            git diff --color=always
+            exit 1
+          fi
