@@ -33,10 +33,14 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Detect Go
+# Detect Go (check SUDO_USER's home first since we run as root)
 GO_CMD=""
-if command -v go &> /dev/null; then
-    GO_CMD="go"
+SUDO_USER_HOME="$(eval echo ~"$RUN_USER")"
+
+if [ -x "$SUDO_USER_HOME/go-local/go/bin/go" ]; then
+    GO_CMD="$SUDO_USER_HOME/go-local/go/bin/go"
+    export PATH="$SUDO_USER_HOME/go-local/go/bin:$PATH"
+    export GOTOOLCHAIN=local
 elif [ -x "$HOME/go-local/go/bin/go" ]; then
     GO_CMD="$HOME/go-local/go/bin/go"
     export PATH="$HOME/go-local/go/bin:$PATH"
@@ -44,6 +48,8 @@ elif [ -x "$HOME/go-local/go/bin/go" ]; then
 elif [ -x "/usr/local/go/bin/go" ]; then
     GO_CMD="/usr/local/go/bin/go"
     export PATH="/usr/local/go/bin:$PATH"
+elif command -v go &> /dev/null; then
+    GO_CMD="go"
 fi
 
 # Build binary if Go is available
