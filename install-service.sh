@@ -6,7 +6,8 @@ set -e
 
 INSTALL_DIR="/opt/agent-proxy-v2"
 SERVICE_NAME="agent-proxy"
-SOURCE_DIR="/home/radxa/Documents/Projects/Agent_PROXY_V2"
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
+RUN_USER="${SUDO_USER:-$(whoami)}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -32,10 +33,33 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Detect Go
+GO_CMD=""
+if command -v go &> /dev/null; then
+    GO_CMD="go"
+elif [ -x "$HOME/go-local/go/bin/go" ]; then
+    GO_CMD="$HOME/go-local/go/bin/go"
+    export PATH="$HOME/go-local/go/bin:$PATH"
+    export GOTOOLCHAIN=local
+elif [ -x "/usr/local/go/bin/go" ]; then
+    GO_CMD="/usr/local/go/bin/go"
+    export PATH="/usr/local/go/bin:$PATH"
+fi
+
+# Build binary if Go is available
+if [ -n "$GO_CMD" ]; then
+    log_info "Building proxy binary with Go ($($GO_CMD version))..."
+    cd "$SOURCE_DIR"
+    $GO_CMD build -o proxy ./cmd/proxy/
+    log_info "Build successful."
+else
+    log_warn "Go not found. Using existing binary if available."
+fi
+
 # Check if binary exists
 if [ ! -f "$SOURCE_DIR/proxy" ]; then
     log_error "Proxy binary not found at $SOURCE_DIR/proxy"
-    log_info "Build it first: cd $SOURCE_DIR && go build -o proxy ./cmd/proxy/"
+    log_info "Install Go and build: cd $SOURCE_DIR && go build -o proxy ./cmd/proxy/"
     exit 1
 fi
 
@@ -61,9 +85,9 @@ if [ -d "$SOURCE_DIR/web/dist" ]; then
     cp -r "$SOURCE_DIR/web/dist" "$INSTALL_DIR/web/"
 fi
 
-# Set ownership (run as radxa user)
-log_info "Setting ownership to radxa:radxa..."
-chown -R radxa:radxa "$INSTALL_DIR"
+# Set ownership
+log_info "Setting ownership to $RUN_USER:$RUN_USER..."
+chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
 
 # Stop existing service if running
 if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
@@ -79,7 +103,7 @@ fi
 
 # Write systemd service file
 log_info "Installing systemd service..."
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << 'EOF'
+cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
 [Unit]
 Description=Agent Proxy V2 - AI Gateway
 After=network-online.target
@@ -87,8 +111,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=radxa
-Group=radxa
+User=${RUN_USER}
+Group=${RUN_USER}
 WorkingDirectory=/opt/agent-proxy-v2
 ExecStart=/opt/agent-proxy-v2/proxy
 Restart=always
