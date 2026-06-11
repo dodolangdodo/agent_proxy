@@ -69,6 +69,12 @@ if [ ! -f "$SOURCE_DIR/proxy" ]; then
     exit 1
 fi
 
+# Stop existing service BEFORE copying binary (avoids "Text file busy")
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    log_warn "Stopping existing $SERVICE_NAME service..."
+    systemctl stop "$SERVICE_NAME"
+fi
+
 # Create install directory
 log_info "Creating install directory: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
